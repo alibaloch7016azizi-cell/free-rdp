@@ -19,8 +19,21 @@ jobs:
         # تنظیم رمز قوی
         $password = ConvertTo-SecureString "LaptopRDP2024!" -AsPlainText -Force
         Set-LocalUser -Name "runneradmin" -Password $password
-        Add-LocalGroupMember -Group "Remote Desktop Users" -Member "runneradmin"
-        Add-LocalGroupMember -Group "Administrators" -Member "runneradmin"
+        
+        # اضافه کردن به گروه‌ها (با چک کردن اینکه قبلاً عضو نباشه)
+        try {
+            Add-LocalGroupMember -Group "Remote Desktop Users" -Member "runneradmin" -ErrorAction SilentlyContinue
+            Write-Host "✅ Added to Remote Desktop Users group"
+        } catch {
+            Write-Host "⚠️ Already member of Remote Desktop Users"
+        }
+        
+        try {
+            Add-LocalGroupMember -Group "Administrators" -Member "runneradmin" -ErrorAction SilentlyContinue
+            Write-Host "✅ Added to Administrators group"
+        } catch {
+            Write-Host "⚠️ Already member of Administrators"
+        }
 
     - name: Setup CloudFlare Tunnel
       run: |
