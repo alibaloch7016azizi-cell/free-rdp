@@ -1,38 +1,165 @@
-name: Simple Working RDP
+name: Windows RDP Server with PlayIt.gg
 
 on:
   workflow_dispatch:
+    inputs:
+      username:
+        description: 'RDP Username'
+        required: true
+        default: 'admin'
+      password:
+        description: 'RDP Password'
+        required: true
+        default: 'MySecurePass123!'
 
 jobs:
-  rdp:
+  rdp-server:
     runs-on: windows-latest
-    timeout-minutes: 360
+    timeout-minutes: 360  # 6 hours max
 
     steps:
-    - name: Enable RDP
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Enable RDP and configure user
       run: |
-        Write-Host "🔧 Setting up RDP..."
-        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -Value 0
+        # Enable RDP
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -value 0
         Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-        $password = ConvertTo-SecureString "Simple123!" -AsPlainText -Force
-        Set-LocalUser -Name "runneradmin" -Password $password
-        Write-Host "✅ RDP enabled!"
-
-    - name: Download Tunnel
-      run: |
-        Write-Host "📥 Downloading tunnel..."
-        Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "tunnel.exe"
-        Write-Host "✅ Downloaded!"
-
-    - name: Start Tunnel
-      run: |
-        Write-Host "🚀 Starting tunnel..."
-        Write-Host ""
         
-        # شروع tunnel به صورت مستقیم
-        & ".\tunnel.exe" tunnel --url tcp://localhost:3389
+        # Create or configure user
+        $username = "${{ github.event.inputs.username }}"
+        $password = "${{ github.event.inputs.password }}" | ConvertTo-SecureString -AsPlainText -Force
+        
+        # Check if user exists
+        try {
+            Get-LocalUser -Name $username -ErrorAction Stop
+            Write-Host "User $username already exists, updating password..."
+            Set-LocalUser -Name $username -Password $password
+        } catch {
+            Write-Host "Creating new user: $username"
+            New-LocalUser -Name $username -Password $password -Description "RDP User" -PasswordNeverExpires
+        }
+        
+        # Add to Remote Desktop Users group
+        Add-LocalGroupMember -Group "Remote Desktop Users" -Member $username -ErrorAction SilentlyContinue
+        Add-LocalGroupMember -Group "Administrators" -Member $username -ErrorAction SilentlyContinue
+        
+        Write-Host "RDP enabled successfully!"
 
-    - name: Keep Alive (This won't run but needed)
+    - name: Download and setup PlayIt.gg
       run: |
-        Write-Host "Session active..."
-        Start-Sleep -Seconds 21000
+        # Download PlayIt agent
+        $url = "https://github.com/playit-cloud/playit-agent/releases/latest/download/playit-win_64.exe"
+        Invoke-WebRequest -Uri $url -OutFile "playit.exe"
+        
+        Write-Host "PlayIt.gg downloaded successfully!"
+
+    - name: Start PlayIt Tunnel
+      run: |
+        Write-Host "Starting PlayIt.gg tunnel..."
+        
+        # Start PlayIt in background
+        $playitProcess = Start-Process -FilePath ".\playit.exe" -ArgumentList "--stdout" -PassThru -WindowStyle Hidden -RedirectStandardOutput "playit-output.txt" -RedirectStandardError "playit-error.txt"
+        
+        Write-Host "PlayIt.gg tunnel started! Process ID: $($playitProcess.Id)"
+        Start-Sleep -Seconds 15
+        
+        # Try to read the output to get connection info
+        if (Test-Path "playit-output.txt") {
+            $output = Get-Content "playit-output.txt" -Raw
+            Write-Host "PlayIt Output:"
+            Write-Host $output
+        }
+        
+        if (Test-Path "playit-error.txt") {
+            $error = Get-Content "playit-error.txt" -Raw
+            if ($error) {
+                Write-Host "PlayIt Errors:"
+                Write-Host $error
+            }
+        }
+
+    - name: Setup alternative - Serveo SSH Tunnel
+      run: |
+        Write-Host "Setting up Serveo as backup tunnel..."
+        
+        # Download and setup SSH client if needed
+        # Serveo works through SSH tunneling
+        Write-Host "Serveo tunnel info:"
+        Write-Host "You can also manually create SSH tunnel:"
+        Write-Host "ssh -R 3389:localhost:3389 serveo.net"
+
+    - name: Setup alternative - LocalTunnel
+      run: |
+        Write-Host "Installing Node.js and LocalTunnel as third option..."
+        
+        # Install Node.js
+        choco install nodejs -y
+        
+        # Install LocalTunnel
+        npm install -g localtunnel
+        
+        # Start LocalTunnel
+        Start-Process -FilePath "cmd" -ArgumentList "/c", "lt --port 3389 --subdomain github-rdp-${{ github.run_id }}" -WindowStyle Hidden
+        
+        Write-Host "LocalTunnel started on subdomain: github-rdp-${{ github.run_id }}"
+
+    - name: Display connection information
+      run: |
+        Write-Host "==================== RDP CONNECTION INFO ===================="
+        Write-Host "🖥️  Server: Windows Server (GitHub Actions Runner)"
+        Write-Host "👤 Username: ${{ github.event.inputs.username }}"
+        Write-Host "🔑 Password: ${{ github.event.inputs.password }}"
+        Write-Host "🌐 Connection Methods:"
+        Write-Host "   1. PlayIt.gg - Check output above for connection URL"
+        Write-Host "   2. LocalTunnel - https://github-rdp-${{ github.run_id }}.loca.lt"
+        Write-Host ""
+        Write-Host "📋 System Information:"
+        Get-ComputerInfo | Select-Object WindowsProductName, TotalPhysicalMemory, CsProcessors | Format-List
+        
+        Write-Host "🔗 Network Interfaces:"
+        Get-NetIPAddress -AddressFamily IPv4 | Where-Object {$_.IPAddress -ne '127.0.0.1'} | Select-Object IPAddress, InterfaceAlias | Format-Table
+        
+        Write-Host "⚠️  Important Notes:"
+        Write-Host "   - PlayIt.gg requires account creation (free)"
+        Write-Host "   - LocalTunnel works immediately but may be slower"
+        Write-Host "   - Session will stay active for up to 6 hours"
+        Write-Host "==========================================================="
+
+    - name: Keep session alive and monitor tunnels
+      run: |
+        Write-Host "🕐 Keeping session alive and monitoring tunnels..."
+        Write-Host "⏱️  Timeout: 6 hours maximum"
+        
+        $counter = 0
+        while ($true) {
+            Start-Sleep -Seconds 60
+            $counter++
+            
+            Write-Host "⏱️  Session active for $counter minutes..."
+            
+            # Check if PlayIt is still running
+            $playitRunning = Get-Process -Name "playit*" -ErrorAction SilentlyContinue
+            if ($playitRunning) {
+                Write-Host "✅ PlayIt.gg tunnel is running"
+            } else {
+                Write-Host "⚠️  PlayIt.gg tunnel may have stopped"
+            }
+            
+            # Check LocalTunnel
+            $nodeProcesses = Get-Process -Name "node" -ErrorAction SilentlyContinue
+            if ($nodeProcesses) {
+                Write-Host "✅ LocalTunnel is running"
+            }
+            
+            # Add some system activity
+            try {
+                Add-Type -AssemblyName System.Windows.Forms
+                $pos = [System.Windows.Forms.Cursor]::Position
+                [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(($pos.X + 1), $pos.Y)
+                [System.Windows.Forms.Cursor]::Position = $pos
+            } catch {
+                # Ignore cursor movement errors
+            }
+        }
