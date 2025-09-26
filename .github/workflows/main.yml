@@ -1,0 +1,80 @@
+name: Simple RDP for Laptop
+
+on:
+  workflow_dispatch:  # فقط اجرای دستی
+
+jobs:
+  rdp:
+    runs-on: windows-latest
+    timeout-minutes: 360  # 6 ساعت
+
+    steps:
+    - name: Enable RDP
+      run: |
+        # فعال کردن RDP
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -Value 0
+        Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 1
+        
+        # تنظیم رمز قوی
+        $password = ConvertTo-SecureString "LaptopRDP2024!" -AsPlainText -Force
+        Set-LocalUser -Name "runneradmin" -Password $password
+        Add-LocalGroupMember -Group "Remote Desktop Users" -Member "runneradmin"
+        Add-LocalGroupMember -Group "Administrators" -Member "runneradmin"
+
+    - name: Setup CloudFlare Tunnel
+      run: |
+        # دانلود cloudflared
+        Write-Host "Downloading CloudFlare Tunnel..."
+        Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "cloudflared.exe"
+        
+        Write-Host "Starting tunnel..."
+        Start-Process -FilePath "./cloudflared.exe" -ArgumentList "tunnel", "--url", "tcp://localhost:3389" -PassThru -RedirectStandardOutput "tunnel_output.txt"
+
+    - name: Display Connection Info
+      run: |
+        Start-Sleep -Seconds 20
+        
+        Write-Host "===============================================" -ForegroundColor Green
+        Write-Host "🖥️  RDP CONNECTION READY!" -ForegroundColor Yellow
+        Write-Host "===============================================" -ForegroundColor Green
+        Write-Host ""
+        Write-Host "📋 Connection Details:" -ForegroundColor Cyan
+        Write-Host "Username: runneradmin"
+        Write-Host "Password: LaptopRDP2024!"
+        Write-Host ""
+        Write-Host "🌐 Looking for tunnel URL in logs above..." -ForegroundColor Cyan
+        Write-Host "Look for: 'https://xxx.trycloudflare.com'" -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "⏰ Session will stay active for 6 hours" -ForegroundColor Magenta
+        Write-Host "===============================================" -ForegroundColor Green
+        
+        # نمایش اطلاعات سیستم
+        Write-Host "💻 System Info:" -ForegroundColor Cyan
+        Get-ComputerInfo | Select-Object WindowsProductName, TotalPhysicalMemory
+
+    - name: Keep Alive
+      run: |
+        Write-Host "🔄 Keeping session alive..." -ForegroundColor Green
+        
+        for ($i = 1; $i -le 360; $i++) {
+            Start-Sleep -Seconds 60
+            
+            if ($i % 15 -eq 0) {
+                $timeLeft = 360 - $i
+                Write-Host "⏱️  Session active - $timeLeft minutes remaining" -ForegroundColor Yellow
+            }
+            
+            # هر 30 دقیقه یبار چک کن tunnel هنوز کار می‌کنه
+            if ($i % 30 -eq 0) {
+                $processes = Get-Process cloudflared -ErrorAction SilentlyContinue
+                if ($processes) {
+                    Write-Host "✅ Tunnel is running" -ForegroundColor Green
+                } else {
+                    Write-Host "⚠️ Tunnel might be down, restarting..." -ForegroundColor Red
+                    Start-Process -FilePath "./cloudflared.exe" -ArgumentList "tunnel", "--url", "tcp://localhost:3389" -PassThru
+                }
+            }
+        }
+        
+        Write-Host "⏰ Session ended after 6 hours" -ForegroundColor Red
