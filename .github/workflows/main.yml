@@ -1,4 +1,4 @@
-name: Quick RDP URL
+name: Simple Working RDP
 
 on:
   workflow_dispatch:
@@ -9,60 +9,30 @@ jobs:
     timeout-minutes: 360
 
     steps:
-    - name: Setup RDP
+    - name: Enable RDP
       run: |
+        Write-Host "🔧 Setting up RDP..."
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -Value 0
         Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-        $password = ConvertTo-SecureString "Quick123!" -AsPlainText -Force
+        $password = ConvertTo-SecureString "Simple123!" -AsPlainText -Force
         Set-LocalUser -Name "runneradmin" -Password $password
+        Write-Host "✅ RDP enabled!"
 
-    - name: Get Tunnel URL
+    - name: Download Tunnel
       run: |
-        # دانلود و اجرای tunnel
-        Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "cf.exe"
-        
-        # اجرای tunnel و capture کردن خروجی
-        $tunnelJob = Start-Job -ScriptBlock {
-            & "$using:pwd\cf.exe" tunnel --url tcp://localhost:3389 2>&1
-        }
-        
-        # صبر و چک کردن خروجی
-        Start-Sleep -Seconds 5
-        
-        for ($i = 1; $i -le 30; $i++) {
-            $output = Receive-Job $tunnelJob -Keep
-            
-            if ($output -match "https://[a-zA-Z0-9-]+\.trycloudflare\.com") {
-                $url = $matches[0]
-                
-                Write-Host ""
-                Write-Host "🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉" -ForegroundColor Green
-                Write-Host "🎉                    SUCCESS!                    🎉" -ForegroundColor Yellow
-                Write-Host "🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉" -ForegroundColor Green
-                Write-Host ""
-                Write-Host "🔗 RDP Address: $url" -ForegroundColor Cyan
-                Write-Host "👤 Username: runneradmin" -ForegroundColor Cyan
-                Write-Host "🔐 Password: Quick123!" -ForegroundColor Cyan
-                Write-Host ""
-                Write-Host "📱 Open Remote Desktop Connection and connect to:" -ForegroundColor White
-                Write-Host "   $url" -ForegroundColor Yellow
-                Write-Host ""
-                Write-Host "🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉" -ForegroundColor Green
-                
-                break
-            }
-            
-            Start-Sleep -Seconds 2
-            Write-Host "⏳ Waiting for tunnel URL... ($i/30)"
-        }
-        
-        # اگه URL پیدا نشد، کل خروجی رو نشون بده
-        if (-not $url) {
-            Write-Host "❌ URL not found. Full output:"
-            Write-Host ($output | Out-String)
-        }
+        Write-Host "📥 Downloading tunnel..."
+        Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "tunnel.exe"
+        Write-Host "✅ Downloaded!"
 
-    - name: Stay Alive
+    - name: Start Tunnel
       run: |
-        Write-Host "🔄 Session will stay active for 6 hours..."
+        Write-Host "🚀 Starting tunnel..."
+        Write-Host ""
+        
+        # شروع tunnel به صورت مستقیم
+        & ".\tunnel.exe" tunnel --url tcp://localhost:3389
+
+    - name: Keep Alive (This won't run but needed)
+      run: |
+        Write-Host "Session active..."
         Start-Sleep -Seconds 21000
